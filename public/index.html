@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Bible Scroll</title>
+  <meta name="description" content="Scroll through the Bible one passage at a time.">
+  <meta name="theme-color" content="#0b1020">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Bible Scroll">
+  <script>
+    // Apply the saved theme before first paint so there is no flash.
+    (function () {
+      var theme = 'auto';
+      try { theme = (JSON.parse(localStorage.getItem('bs:settings')) || {}).theme || 'auto'; } catch (e) {}
+      if (theme === 'auto') theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header id="bar">
+    <button id="chip" class="chip" aria-label="Choose a book and chapter">
+      <span id="chipLabel">Bible</span>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="bar-actions">
+      <button id="searchBtn" class="icon-btn" aria-label="Search">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="10.500" cy="10.500" r="6.500" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.500 15.500L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button id="savedBtn" class="icon-btn" aria-label="Saved passages">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><circle cx="16" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="17" r="2.4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+    <div id="progress"><i></i></div>
+  </header>
+
+  <main id="feed" tabindex="-1" aria-label="Bible passages"></main>
+  <section id="searchPage" hidden aria-label="Search">
+    <header class="search-top">
+      <div class="search-row">
+        <button id="searchBack" class="icon-btn" aria-label="Back to reading">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.400" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <input id="searchField" type="search" placeholder="A word, a phrase, or John 3:16" aria-label="Search the Bible" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+      </div>
+      <div class="search-sub">
+        <span id="searchMeta"></span>
+        <span class="search-tools">
+          <button id="searchRef" class="chip" hidden></button>
+          <button id="searchView" class="icon-btn" aria-label="Show as a feed">
+            <svg class="to-feed" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="6.500" y="3.500" width="11" height="17" rx="2.500" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            <svg class="to-list" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 6.500h16M4 12h16M4 17.500h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </span>
+      </div>
+    </header>
+    <div id="searchList" hidden aria-label="Search results as a list"></div>
+    <div id="searchResults" tabindex="-1" aria-label="Search results"></div>
+  </section>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <dialog id="pickerSheet" class="sheet">
+    <div class="sheet-head"><button class="back" hidden aria-label="Back to books">&#8249;</button><h2></h2><button class="close" aria-label="Close">&times;</button></div>
+    <div class="sheet-body"></div>
+  </dialog>
+
+  <dialog id="savedSheet" class="sheet">
+    <div class="sheet-head"><h2>Saved</h2><button class="close" aria-label="Close">&times;</button></div>
+    <div class="sheet-body"></div>
+  </dialog>
+
+  <dialog id="notesSheet" class="sheet tall">
+    <div class="sheet-head"><h2>Notes</h2><button class="close" aria-label="Close">&times;</button></div>
+    <div class="sheet-body"></div>
+    <div class="sheet-foot">
+      <div id="noteEditing" class="editing" hidden><span>Editing your note</span><button type="button">Cancel</button></div>
+      <div class="composer">
+        <div class="avatar" aria-hidden="true"></div>
+        <textarea id="noteField" rows="1" placeholder="Add a note&hellip;" aria-label="Your note"></textarea>
+        <button id="noteSend" class="send" type="button" aria-label="Post note" disabled>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="askSheet" class="sheet tall">
+    <div class="sheet-head"><h2>Ask</h2><button class="close" aria-label="Close">&times;</button></div>
+    <div class="sheet-body"></div>
+    <div class="sheet-foot">
+      <div class="composer">
+        <textarea id="askField" rows="1" placeholder="Ask about this passage&hellip;" aria-label="Your question"></textarea>
+        <button id="askSend" class="send" type="button" aria-label="Ask" disabled>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </button>
+      </div>
+      <p class="ask-note">AI can get things wrong. Check what matters against the text and sources you trust.</p>
+    </div>
+  </dialog>
+
+  <dialog id="syncSheet" class="sheet">
+    <div class="sheet-head"><h2>Sync across devices</h2><button class="close" aria-label="Close">&times;</button></div>
+    <div class="sheet-body"></div>
+  </dialog>
+
+  <dialog id="settingsSheet" class="sheet">
+    <div class="sheet-head"><h2>Settings</h2><button class="close" aria-label="Close">&times;</button></div>
+    <div class="sheet-body">
+      <label class="row">
+        <span>Text size</span>
+        <input id="scale" type="range" min="0.85" max="1.5" step="0.05">
+      </label>
+      <div class="row" id="translationRow" hidden>
+        <span>Translation</span>
+        <div class="seg" id="translationSeg"></div>
+      </div>
+      <div class="row">
+        <span>Theme</span>
+        <div class="seg" id="themeSeg">
+          <button data-theme-choice="auto">Auto</button>
+          <button data-theme-choice="light">Light</button>
+          <button data-theme-choice="paper">Paper</button>
+          <button data-theme-choice="dark">Dark</button>
+        </div>
+      </div>
+      <button id="syncBtn" class="row link-row">
+        <span>Sync across devices</span>
+        <span id="syncState" class="muted">Off</span>
+      </button>
+      <p class="fine">Your notes, saved passages and place stay on this device unless you turn sync on. There are no accounts.</p>
+      <button id="reset" class="danger">Erase saved data on this device</button>
+      <p class="fine copyright" id="notice"></p>
+    </div>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

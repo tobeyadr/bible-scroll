@@ -1,0 +1,15 @@
+node_modules/
+.wrangler/
+.dev.vars
+
+# The ESV is copyrighted by Crossway, so the bundled copy and what builds and tests it stay out of the repository.
+# The licensed route (the ESV API through the Worker, with your own key) is in the code. See README, Translations.
+/public/esv/
+/scripts/build-esv.mjs
+/test/esv.test.js
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,2 @@
+# Copy to .dev.vars for `npm run dev`. For production use: npx wrangler secret put ESV_API_KEY
+ESV_API_KEY=your-esv-api-key

@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bible-scroll",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "run_worker_first": ["/api/*"]
+  },
+  // Holds the encrypted sync blobs (see src/sync.js). Created automatically on first deploy.
+  "d1_databases": [{ "binding": "DB", "database_name": "bible-scroll" }],
+  // Workers AI answers the "Ask about this passage" questions (src/ask.js). No key: the binding is the credential.
+  "ai": { "binding": "AI" },
+  "ratelimits": [
+    // Per-IP limit on sync requests.
+    { "name": "SYNC_LIMITER", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } },
+    // Per-IP limit on questions, since each one costs a little.
+    { "name": "ASK_LIMITER", "namespace_id": "1002", "simple": { "limit": 8, "period": 60 } }
+  ],
+  // Daily clean-up of sync spaces untouched for a year.
+  "triggers": { "crons": ["17 4 * * *"] },
+  "observability": { "enabled": true }
+}
