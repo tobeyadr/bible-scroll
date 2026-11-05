@@ -12,6 +12,7 @@ import { splitRefs } from './refs.js'
 import { initAsk } from './ask.js'
 import { snippet } from './search.js'
 import { createArt } from './artui.js'
+import { readKey, chapterStatus, chapterFraction, bookProgress } from './read.js'
 
 // ---------- localStorage (everything is optional; the app works without it) ----------
 
@@ -145,6 +146,7 @@ function renderCard(b, c, card, index, total) {
   sec.dataset.n = total
   sec.style.setProperty('--h', (HUES[BOOKS[b].g] + ((c * 4) % 24)) % 360)
   sec.plain = plainText(card)
+  sec.classList.toggle('read', state.hasRead(b, c, card.v1, card.v2))
 
   const body = make('div', 'body')
   const text = make('div', 'text')
@@ -227,6 +229,7 @@ function refreshCards() {
   document.querySelectorAll('.card:not(.note)').forEach(sec => {
     refreshBadge(sec)
     $('.heart', sec).classList.toggle('on', state.isSaved(cardKey(sec.dataset.b, sec.dataset.c, sec.dataset.v1, sec.dataset.v2)))
+    sec.classList.toggle('read', state.hasRead(+sec.dataset.b, +sec.dataset.c, +sec.dataset.v1, +sec.dataset.v2))
   })
 }
 
@@ -438,11 +441,43 @@ let startingUp = false // true only for the automatic restore of her last place
 const arm = () => (posArmed = true)
 for (const type of ['pointerdown', 'wheel', 'touchstart']) feed.addEventListener(type, arm, { passive: true })
 document.addEventListener('keydown', arm)
+
+// A passage counts as read once it has been the one on screen for this long. The clock only runs while the page is
+// visible and nothing (a sheet, search) is covering the feed, and starts again when she moves to another card.
+const READ_AFTER = 3000
+const READ_TICK = 250
+let readTimer
+const canRead = () => !document.hidden && !document.querySelector('dialog[open]') && $('#searchPage').hidden
+
+function watchRead(sec) {
+  clearTimeout(readTimer)
+  let seen = 0
+  const tick = () => {
+    if (current !== sec || !sec.isConnected) return
+    if (canRead()) seen += READ_TICK
+    if (seen < READ_AFTER) readTimer = setTimeout(tick, READ_TICK)
+    else markRead(sec)
+  }
+  readTimer = setTimeout(tick, READ_TICK)
+}
+
+function markRead(sec) {
+  const b = +sec.dataset.b
+  const c = +sec.dataset.c
+  const verses = chapterCards({ b, c }).map(card => +card.dataset.v2)
+  if (!state.markRead(b, c, +sec.dataset.v1, +sec.dataset.v2, Math.max(...verses))) return
+  if (sec.classList.contains('read')) return
+  sec.classList.add('read', 'just-read') // just-read plays the check's one-time animation
+  setTimeout(() => sec.classList.remove('just-read'), 900)
+}
+
 function onCurrent(sec) {
   current = sec
   const b = +sec.dataset.b
   const c = +sec.dataset.c
   updateChrome({ b, c, i: +sec.dataset.i, n: +sec.dataset.n })
+
+  watchRead(sec)
 
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
@@ -644,24 +679,68 @@ function renderBooks() {
   const grid = make('div', 'grid')
   const from = pickerTab === 'ot' ? 0 : OT_COUNT
   const to = pickerTab === 'ot' ? OT_COUNT : BOOKS.length
+  const read = state.readMap()
   for (let b = from; b < to; b++) {
-    const btn = make('button', current && +current.dataset.b === b ? 'cur' : '', BOOKS[b].n)
+    const { done, chapters, fraction } = bookProgress(read, b, BOOKS[b].c)
+    const cls = [current && +current.dataset.b === b ? 'cur' : '', done === chapters ? 'done' : '', fraction ? 'prog' : '']
+    const btn = make('button', cls.filter(Boolean).join(' '), BOOKS[b].n)
+    btn.style.setProperty('--p', fraction)
+    btn.title = fraction ? `${done} of ${chapters} chapters read` : ''
     btn.addEventListener('click', () => (BOOKS[b].c === 1 ? choose(b, 1) : renderChapters(b)))
     grid.append(btn)
   }
-  body.replaceChildren(tabs, grid)
+  body.replaceChildren(tabs, make('p', 'fine read-total', readTotal(read)), grid)
+}
+
+// "12 of 1,189 chapters read", for the whole Bible.
+function readTotal(read) {
+  let done = 0
+  let all = 0
+  BOOKS.forEach((book, b) => {
+    done += bookProgress(read, b, book.c).done
+    all += book.c
+  })
+  return done ? `${done.toLocaleString()} of ${all.toLocaleString()} chapters read` : 'Passages you stay on for a few seconds count as read.'
 }
 
 function renderChapters(b) {
   $('h2', picker).textContent = BOOKS[b].n
   $('.back', picker).hidden = false
+  const read = state.readMap()
   const grid = make('div', 'grid chapters')
   for (let c = 1; c <= BOOKS[b].c; c++) {
-    const btn = make('button', current && +current.dataset.b === b && +current.dataset.c === c ? 'cur' : '', String(c))
+    const entry = read[readKey(b, c)]
+    const status = chapterStatus(entry)
+    const cls = [current && +current.dataset.b === b && +current.dataset.c === c ? 'cur' : '', status === 'read' ? 'done' : '', status === 'part' ? 'prog' : '']
+    const btn = make('button', cls.filter(Boolean).join(' '), String(c))
+    btn.style.setProperty('--p', chapterFraction(entry))
     btn.addEventListener('click', () => choose(b, c))
     grid.append(btn)
   }
-  $('.sheet-body', picker).replaceChildren(grid)
+
+  const { done, started, chapters } = bookProgress(read, b, BOOKS[b].c)
+  const summary = done || started ? `${done} of ${chapters} chapters read${started ? `, ${started} started` : ''}` : 'Nothing read here yet.'
+  const tools = make('div', 'read-tools')
+  if (done < chapters) {
+    const all = make('button', null, 'Mark all read')
+    all.addEventListener('click', () => {
+      state.markBookRead(b)
+      refreshCards()
+      renderChapters(b)
+    })
+    tools.append(all)
+  }
+  if (done || started) {
+    const clear = make('button', null, 'Clear')
+    clear.addEventListener('click', () => {
+      if (!confirm(`Forget what you have read in ${BOOKS[b].n}?`)) return
+      state.clearRead(b)
+      refreshCards()
+      renderChapters(b)
+    })
+    tools.append(clear)
+  }
+  $('.sheet-body', picker).replaceChildren(make('p', 'fine read-total', summary), grid, tools)
 }
 
 function choose(b, c) {
@@ -975,6 +1054,13 @@ document.querySelectorAll('[data-theme-choice]').forEach(btn =>
 // Offer the Illustrated theme only when pictures ship with the app (the open-source repo has none until some are generated).
 art.available().then(found => {
   $('[data-theme-choice="illustrated"]').hidden = !found && settings.theme !== 'illustrated'
+})
+$('#clearRead').addEventListener('click', () => {
+  const syncNote = sync.isOn() ? ' This also clears it on your other devices.' : ''
+  if (!confirm(`Forget everything you have read?${syncNote}`)) return
+  state.clearRead()
+  refreshCards()
+  toast('Reading progress cleared')
 })
 $('#reset').addEventListener('click', () => {
   const syncNote = sync.isOn() ? ' Sync is turned off on this device; the synced copy and your other devices are not touched.' : ''

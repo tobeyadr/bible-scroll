@@ -73,6 +73,13 @@ The magnifier in the top bar (or `/` on a keyboard) opens a full-screen search p
 - From a verse: tap a word, or long-press and drag to select a few, in the reading feed or in search results. A "Search" chip appears under the words and opens search with them (several words become a quoted phrase). Double-tap still saves the passage. The logic is in `public/pick.js`.
 - The first search reads all 66 book files (about 4 MB, then cached by the service worker) and builds an in-memory verse index (`public/search.js`). Psalm title lines have no verse number, so they are not searched.
 
+## Reading progress
+
+A passage counts as read once it has been the card on screen for 3 seconds (`READ_AFTER` in `public/app.js`). The clock only runs while the page is visible and no sheet or search page covers the feed, and it starts again when you move to another card, so flicking past a passage does not count. A read card shows a check beside its reference.
+
+- The Books sheet shows how many of the 1,189 chapters are read, a bar under each book that has been started (tinted once every chapter is read) and the same for each chapter inside a book. Inside a book, **Mark all read** is for what you read before using the app, and **Clear** forgets that book. Settings has **Clear reading progress** for everything.
+- It is recorded per chapter as the verse ranges read (`public/read.js`), so it does not depend on how a translation splits its cards. It lives in the same document as notes and saved passages, so it syncs between devices when sync is on: verses read on two devices are combined rather than one replacing the other, and a clear spreads to the other device.
+
 ## Illustrated theme
 
 Settings offers an **Illustrated** theme when the Worker can paint pictures: a painted picture behind the text of each card, under a dark wash so the text stays readable. Pictures are not in the repository. They are painted on demand by an image API the first time a scene is scrolled to, and kept in D1, so each is made once. The option stays hidden until a key is set (or pictures already exist).
