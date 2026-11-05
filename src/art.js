@@ -28,7 +28,7 @@ export const PROVIDERS = {
     key: 'OPENAI_API_KEY',
     url: 'https://api.openai.com/v1/images/generations',
     body: (env, prompt) => ({
-      model: env.ART_MODEL || 'gpt-image-1',
+      model: env.ART_MODEL || 'gpt-image-2',
       prompt,
       size: `${plan.size.width}x${plan.size.height}`,
       quality: env.ART_QUALITY || 'medium',
@@ -196,8 +196,10 @@ async function make(env, id) {
   } catch (err) {
     console.error('art: could not paint', id, err)
     await giveBackSlot(env, slot.day)
-    await failJob(env.DB, id, 'The picture could not be made. It will try again in a minute.').catch(() => {})
-    return { error: 'The picture could not be made right now.', status: 502 }
+    // The image API's own reason (a wrong model name, no credit, a content refusal) is what the owner needs to see.
+    const reason = String(err.message || err).slice(0, 240)
+    await failJob(env.DB, id, `The picture could not be made (${reason}). It will try again in a minute.`).catch(() => {})
+    return { error: `The picture could not be made (${reason}).`, status: 502 }
   }
 }
 
