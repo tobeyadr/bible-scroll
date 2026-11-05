@@ -1,7 +1,7 @@
 import { BOOKS } from './books.js'
 
 // Which picture goes behind a card in the Illustrated theme. The list is { ref, img } entries from
-// /art/manifest.json, and a ref can be a whole book ("Genesis"), a chapter ("Genesis 7"), chapters ("Matthew 5-7"),
+// /api/art/plan (img is the picture's id), and a ref can be a whole book ("Genesis"), a chapter ("Genesis 7"), chapters ("Matthew 5-7"),
 // a verse or a run of verses ("Genesis 11:1-9"), or a run that crosses chapters ("Genesis 6:9-9:17").
 // The narrowest entry that covers the card wins, so a book picture is the default and anything more specific
 // overrides it. Pure functions, so they can be tested without a browser.
@@ -71,4 +71,6 @@ export function pickArt(entries, b, c, v) {
   return best ? best.img : null
 }
 
-export const artUrl = img => `/art/${img}`
+// Where a picture is served from. The version is in the address, so a redone picture is fetched afresh while an old
+// one can be kept for good.
+export const artUrl = (id, version = 0) => `/api/art/${id}?v=${version}`

@@ -265,6 +265,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   transition: transform 0.15s ease;
 }
 .rail button:active .disc { transform: scale(0.9); }
+.rail button.busy svg { animation: spin 1.1s linear infinite; }
 .rail .heart.on .disc { background: var(--glass-strong); }
 .rail .heart.on svg { fill: var(--heart); stroke: var(--heart); animation: pop 0.3s ease; }
 @keyframes pop { 50% { transform: scale(1.35); } }

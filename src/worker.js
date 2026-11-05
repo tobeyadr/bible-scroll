@@ -1,6 +1,7 @@
 import { BOOKS } from '../public/books.js'
 import { handleSync, expireOld } from './sync.js'
 import { handleAsk } from './ask.js'
+import { handleArt } from './art.js'
 
 const ESV_URL = 'https://api.esv.org/v3/passage/text/'
 
@@ -48,6 +49,10 @@ export default {
     if (url.pathname.startsWith('/api/sync/')) {
       if (!['GET', 'PUT', 'DELETE'].includes(request.method)) return json({ error: 'Method not allowed' }, 405)
       return handleSync(request, env, url.pathname.slice('/api/sync/'.length))
+    }
+
+    if (url.pathname.startsWith('/api/art/')) {
+      return handleArt(request, env, ctx, url.pathname.slice('/api/art/'.length))
     }
 
     if (url.pathname === '/api/ask') {

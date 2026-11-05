@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 const listeners = {}
 const stores = new Map() // cache name -> Map(url -> response)
 const fetched = []
+let status = 200 // what the fake network answers with
 
 const open = name => {
   if (!stores.has(name)) stores.set(name, new Map())
@@ -23,7 +24,7 @@ globalThis.caches = {
 globalThis.location = { origin: 'https://app.test' }
 globalThis.fetch = async request => {
   fetched.push(request.url)
-  const res = { ok: true, body: `network:${request.url}`, clone: () => res }
+  const res = { ok: status < 400, status, body: `network:${request.url}`, clone: () => res }
   return res
 }
 globalThis.self = {
@@ -39,34 +40,51 @@ const get = async path => {
   listeners.fetch({ request, respondWith: p => (answer = p) })
   return answer && (await answer)
 }
+const art = () => stores.get('bible-scroll-art')
 
 test('a picture is fetched once and then always served from its own cache', async () => {
   fetched.length = 0
-  const first = await get('/art/book-john.webp?v=aaaa1111')
-  assert.equal(first.body, 'network:https://app.test/art/book-john.webp?v=aaaa1111')
-  const again = await get('/art/book-john.webp?v=aaaa1111')
+  const first = await get('/api/art/book-john?v=1')
+  assert.equal(first.body, 'network:https://app.test/api/art/book-john?v=1')
+  const again = await get('/api/art/book-john?v=1')
   assert.equal(again, first)
   assert.equal(fetched.length, 1, 'only the first look goes to the network')
-  assert.ok(stores.get('bible-scroll-art').has('https://app.test/art/book-john.webp?v=aaaa1111'))
+  assert.ok(art().has('https://app.test/api/art/book-john?v=1'))
 })
 
-test('a replaced picture has a new version in its address, so it is fetched again', async () => {
+test('a redone picture has a new version in its address, so it is fetched again', async () => {
   fetched.length = 0
-  await get('/art/book-john.webp?v=bbbb2222')
+  await get('/api/art/book-john?v=2')
   assert.equal(fetched.length, 1)
 })
 
-test('the manifest is not treated as a picture: it is refreshed from the network each time', async () => {
-  fetched.length = 0
-  await get('/art/manifest.json')
-  await get('/art/manifest.json')
-  await new Promise(resolve => setImmediate(resolve))
-  assert.equal(fetched.length, 2)
-  assert.ok(!stores.get('bible-scroll-art').has('https://app.test/art/manifest.json'))
+test('a picture that is still being painted, or failed, is not kept', async () => {
+  for (const code of [202, 429, 502]) {
+    status = code
+    fetched.length = 0
+    await get('/api/art/red-sea?v=0')
+    await get('/api/art/red-sea?v=0')
+    assert.equal(fetched.length, 2, `${code} is asked for again`)
+    assert.ok(!art().has('https://app.test/api/art/red-sea?v=0'), `${code} is not cached`)
+  }
+  status = 200
 })
 
-test('the API is left alone, and a new app version keeps the pictures but drops old app caches', async () => {
+test('the plan, and every other API call, is left to the network', async () => {
+  fetched.length = 0
+  assert.equal(await get('/api/art/plan'), undefined)
   assert.equal(await get('/api/passage?book=0&chapter=1'), undefined)
+  assert.equal(fetched.length, 0, 'the worker does not answer them')
+})
+
+test('a post to redo a picture is never intercepted', () => {
+  let answered = false
+  const request = { method: 'POST', url: 'https://app.test/api/art/red-sea/regenerate', mode: 'cors' }
+  listeners.fetch({ request, respondWith: () => (answered = true) })
+  assert.equal(answered, false)
+})
+
+test('a new app version keeps the pictures but drops old app caches', async () => {
   stores.set('bible-scroll-v1', new Map())
   let done
   listeners.activate({ waitUntil: p => (done = p) })

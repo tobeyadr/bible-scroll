@@ -1,8 +1,8 @@
 // Caches the app shell, plus each BSB book file the first time it is read (public domain, so reading
 // works offline afterwards). ESV text from /api/passage is never stored: its licence forbids it.
-const CACHE = 'bible-scroll-v18'
+const CACHE = 'bible-scroll-v19'
 // The Illustrated theme's pictures live in their own cache, so a new app version does not throw them away. Each is
-// stored the first time it is shown and never re-downloaded: a changed picture gets a new "?v=" in the manifest.
+// stored the first time it is shown and never re-downloaded: a redone picture has a new "?v=" in its address.
 const ART_CACHE = 'bible-scroll-art'
 const SHELL = [
   '/',
@@ -50,22 +50,24 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const { request } = event
   const url = new URL(request.url)
-  if (request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return
+  if (request.method !== 'GET' || url.origin !== location.origin) return
 
-  // A picture: from the cache when it is there, otherwise fetch it once and keep it. (The manifest that lists them
-  // is not a picture and goes through the normal route below, so a new list is picked up.)
-  if (url.pathname.startsWith('/art/') && url.pathname !== '/art/manifest.json') {
+  // A picture (/api/art/<id>?v=n): from the cache when it is there, otherwise fetch it once and keep it. Only a real
+  // picture is kept, not the "still being painted" or error answers, and the plan that lists them (which changes) and
+  // everything else under /api/ is left to the network.
+  if (url.pathname.startsWith('/api/art/') && url.pathname !== '/api/art/plan') {
     event.respondWith(
       caches.open(ART_CACHE).then(async cache => {
         const cached = await cache.match(request)
         if (cached) return cached
         const res = await fetch(request)
-        if (res.ok) cache.put(request, res.clone())
+        if (res.status === 200) cache.put(request, res.clone())
         return res
       }),
     )
     return
   }
+  if (url.pathname.startsWith('/api/')) return
 
   event.respondWith(
     caches.open(CACHE).then(async cache => {

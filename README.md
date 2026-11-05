@@ -75,11 +75,14 @@ The magnifier in the top bar (or `/` on a keyboard) opens a full-screen search p
 
 ## Illustrated theme
 
-Settings offers an **Illustrated** theme when pictures are present: a painted picture behind the text of each card, under a dark wash so the text stays readable. The repository ships the plan and the code but no pictures yet, so the option stays hidden until `public/art/manifest.json` lists some.
+Settings offers an **Illustrated** theme when the Worker can paint pictures: a painted picture behind the text of each card, under a dark wash so the text stays readable. Pictures are not in the repository. They are painted on demand by an image API the first time a scene is scrolled to, and kept in D1, so each is made once. The option stays hidden until a key is set (or pictures already exist).
 
-- The plan is `art/images.json` (the style, and the 66 book pictures and 90 moments with their passages and prompts; see `art/README.md`). A book picture is the default, and a verse range, chapter or run of chapters overrides it. The narrowest match for a card's first verse wins (`public/art.js`).
-- `node scripts/build-art-manifest.mjs` writes `public/art/manifest.json` from the pictures that exist in `public/art/`, each with a `?v=` hash.
-- `public/artui.js` loads a picture before showing it, so a card never flashes a broken image, and fetches nothing at all in the other themes. The service worker keeps pictures in their own cache and serves them from it after the first look (`bible-scroll-art`, not cleared by app updates).
+- The plan is `art/images.json` (the style, and the 66 book pictures and 90 moments with their passages and prompts; see `art/README.md`). A book picture is the default, and a verse range, chapter or run of chapters overrides it. The narrowest match for a card's first verse wins (`public/art.js`). Spend is bounded by the plan: at most 156 pictures, plus any Redo.
+- `src/art.js` is the Worker side: `GET /api/art/plan`, `GET /api/art/<id>` (paints it if missing) and `POST /api/art/<id>/regenerate`. One picture is painted at a time, a failed one waits a minute before retrying, and `ART_DAILY_LIMIT` (default 40) caps new pictures a day. Requests are also rate limited per address (`ART_LIMITER` in `wrangler.jsonc`).
+- Set a key yourself, it is never in the repo: `npx wrangler secret put OPENAI_API_KEY` (or `XAI_API_KEY`). `ART_PROVIDER` (`openai` or `xai`) picks one when both are set; `ART_MODEL` and `ART_QUALITY` (OpenAI, default `medium`) are optional variables. The OpenAI request is the tested shape; the xAI one follows its published API but has not been run against the live service.
+- The first view of a scene waits while it is painted (up to a minute or so, and the card keeps its plain background meanwhile). After that it is instant.
+- **Redo** in the card's button column paints a new picture for that scene and replaces the current one.
+- `public/artui.js` loads a picture before showing it, so a card never flashes a broken image, and fetches nothing at all in the other themes. The service worker keeps pictures in their own cache and serves them from it after the first look (`bible-scroll-art`, not cleared by app updates); a redone picture has a new `?v=` so it is fetched afresh.
 - It is skipped when the browser asks to save data.
 
 ## Other notes

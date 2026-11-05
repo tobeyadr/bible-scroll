@@ -101,6 +101,7 @@ test('a manifest with bad entries, or none, is still usable', () => {
   assert.deepEqual(compileArt({}), [])
 })
 
-test('the picture url keeps a version query, which is how a replaced picture gets past the cache', () => {
-  assert.equal(artUrl('john.webp?v=ab12'), '/art/john.webp?v=ab12')
+test('the picture url keeps a version query, which is how a redone picture gets past the cache', () => {
+  assert.equal(artUrl('book-john', 3), '/api/art/book-john?v=3')
+  assert.equal(artUrl('book-john'), '/api/art/book-john?v=0')
 })

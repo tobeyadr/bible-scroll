@@ -15,7 +15,9 @@
     // Per-IP limit on sync requests.
     { "name": "SYNC_LIMITER", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } },
     // Per-IP limit on questions, since each one costs a little.
-    { "name": "ASK_LIMITER", "namespace_id": "1002", "simple": { "limit": 8, "period": 60 } }
+    { "name": "ASK_LIMITER", "namespace_id": "1002", "simple": { "limit": 8, "period": 60 } },
+    // Per-IP limit on painting pictures for the Illustrated theme (src/art.js), which also costs a little each.
+    { "name": "ART_LIMITER", "namespace_id": "1003", "simple": { "limit": 8, "period": 60 } }
   ],
   // Daily clean-up of sync spaces untouched for a year.
   "triggers": { "crons": ["17 4 * * *"] },

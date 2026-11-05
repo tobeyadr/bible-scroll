@@ -3,10 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { BOOKS, slug } from '../public/books.js'
 import { parseArtRef, compileArt, pickArt } from '../public/art.js'
-import { buildManifest } from '../scripts/build-art-manifest.mjs'
 
 const set = JSON.parse(readFileSync(new URL('../art/images.json', import.meta.url), 'utf8'))
-const manifestFile = JSON.parse(readFileSync(new URL('../public/art/manifest.json', import.meta.url), 'utf8'))
 const verseCount = (b, c) => {
   const raw = JSON.parse(readFileSync(new URL(`../public/bsb/${b}.json`, import.meta.url)))[c - 1]
   return Math.max(...[...raw.matchAll(/\[(\d+)\]/g)].map(m => +m[1]))
@@ -15,7 +13,7 @@ const decode = key => ({ b: Math.floor(key / 1e6), c: Math.floor((key % 1e6) / 1
 
 test('the set has a style, a size and uniquely named images with prompts and passages', () => {
   assert.ok(set.style.length > 200, 'style')
-  assert.deepEqual(set.size, { width: 1080, height: 1920 })
+  assert.deepEqual(set.size, { width: 1024, height: 1536 })
   const ids = set.images.map(i => i.id)
   assert.equal(new Set(ids).size, ids.length, 'ids are unique')
   for (const image of set.images) {
@@ -72,25 +70,4 @@ test('a first batch is marked, covering different kinds of picture', () => {
   const pilot = set.images.filter(i => i.pilot)
   assert.ok(pilot.length >= 6 && pilot.length <= 12, `${pilot.length} pilot pictures`)
   assert.ok(pilot.some(i => i.id.startsWith('book-')) && pilot.some(i => !i.id.startsWith('book-')))
-})
-
-test('the manifest lists only pictures that exist, with a version on each', () => {
-  const files = new Map([['book-john', 'aaaa1111'], ['walking-on-water', 'bbbb2222']])
-  const built = buildManifest(set.images, id => files.get(id) ?? null)
-  assert.deepEqual(built.art, [
-    { ref: 'John', img: 'book-john.webp?v=aaaa1111' },
-    { ref: 'Matthew 14:22-33', img: 'walking-on-water.webp?v=bbbb2222' },
-    { ref: 'Mark 6:45-52', img: 'walking-on-water.webp?v=bbbb2222' },
-    { ref: 'John 6:16-21', img: 'walking-on-water.webp?v=bbbb2222' },
-  ])
-  assert.deepEqual(buildManifest(set.images, () => null), { art: [] })
-})
-
-test('the shipped manifest only names pictures in the set', () => {
-  const ids = new Set(set.images.map(i => i.id))
-  for (const entry of manifestFile.art) {
-    assert.match(entry.img, /^[a-z0-9-]+\.webp\?v=[0-9a-f]{8}$/, entry.img)
-    assert.ok(ids.has(entry.img.split('.')[0]), `${entry.img} is in the set`)
-    assert.ok(parseArtRef(entry.ref), entry.ref)
-  }
 })

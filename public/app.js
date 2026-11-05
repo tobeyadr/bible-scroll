@@ -106,6 +106,7 @@ const ICON = {
   share: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>',
   note: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.600 7.100L3 21l1.900-5.400A8 8 0 1 1 21 12z"/></svg>',
   ask: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.900 5.100L19 10l-5.100 1.900L12 17l-1.900-5.100L5 10l5.100-1.900zM19 15l.8 2.200L22 18l-2.200.8L19 21l-.8-2.200L16 18l2.200-.8z"/></svg>',
+  redo: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.600-6.400L21 8M21 3v5h-5"/></svg>',
   book: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.500A2.500 2.500 0 0 1 6.500 3H20v15H6.500A2.500 2.500 0 0 0 4 20.500zM4 20.500A2.500 2.500 0 0 0 6.500 23H20v-5"/></svg>',
 }
 
@@ -166,6 +167,7 @@ function renderCard(b, c, card, index, total) {
 function railButton(act, label, aria, icon, cls = '') {
   const btn = make('button', cls)
   btn.dataset.act = act
+  btn.hidden = act === 'redo' // shown by public/artui.js once the card has a picture
   btn.setAttribute('aria-label', aria)
   const badge = act === 'notes' ? '<i class="badge" hidden></i>' : ''
   btn.innerHTML = `<span class="disc">${icon}${badge}</span><span>${label}</span>`
@@ -176,6 +178,7 @@ const railButtons = saved => [
   railButton('save', 'Save', 'Save this passage', ICON.heart, 'heart' + (saved ? ' on' : '')),
   railButton('notes', 'Notes', 'Your notes on this passage', ICON.note),
   ...(SHOW_ASK ? [railButton('ask', 'Ask', 'Ask a question about this passage', ICON.ask)] : []),
+  railButton('redo', 'Redo', 'Paint a new picture for this scene', ICON.redo),
   ...(SHOW_SHARE ? [railButton('share', 'Share', 'Share this passage', ICON.share)] : []),
 ]
 
@@ -498,6 +501,24 @@ async function share(sec) {
   }
 }
 
+// Paints a new picture for this card's scene. It costs a few cents and takes up to a minute, so it asks first.
+async function redoArt(sec, button) {
+  if (button.disabled) return
+  if (!confirm('Paint a new picture for this scene? It takes up to a minute and replaces the current one.')) return
+  button.disabled = true
+  button.classList.add('busy')
+  toast('Painting a new picture…')
+  try {
+    await art.redo(sec)
+    toast('New picture ready')
+  } catch (err) {
+    toast(err.message)
+  } finally {
+    button.disabled = false
+    button.classList.remove('busy')
+  }
+}
+
 let toastTimer
 // An optional action ({ label, run }) adds a button and keeps the toast up a little longer.
 function toast(message, action) {
@@ -540,6 +561,7 @@ function wireCards(container, onAct = {}) {
     if (act === 'save') toggleSaved(sec)
     else if (act === 'notes') openNotes(sec)
     else if (act === 'ask') openAsk(sec)
+    else if (act === 'redo') redoArt(sec, button)
     else if (act === 'share') share(sec)
     else onAct[act]?.(sec)
   })
