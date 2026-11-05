@@ -11,6 +11,7 @@ import { initPicker } from './pick.js'
 import { splitRefs } from './refs.js'
 import { initAsk } from './ask.js'
 import { snippet } from './search.js'
+import { createArt } from './artui.js'
 
 // ---------- localStorage (everything is optional; the app works without it) ----------
 
@@ -62,10 +63,13 @@ const searchSource = () => (source().book ? source() : SOURCES.BSB)
 
 const prefersLight = matchMedia('(prefers-color-scheme: light)')
 
+// The Illustrated theme puts a picture behind each card (public/art.js picks it, public/artui.js shows it).
+const art = createArt({ isOn: () => settings.theme === 'illustrated' })
+
 function applyTheme() {
   const theme = settings.theme === 'auto' ? (prefersLight.matches ? 'light' : 'dark') : settings.theme
   document.documentElement.dataset.theme = theme
-  $('meta[name="theme-color"]').content = { light: '#f1ebdd', paper: '#e9dfc9', dark: '#0b1020' }[theme]
+  $('meta[name="theme-color"]').content = { light: '#f1ebdd', paper: '#e9dfc9', dark: '#0b1020', illustrated: '#0b1020' }[theme]
   document.querySelectorAll('[data-theme-choice]').forEach(b =>
     b.setAttribute('aria-pressed', String(b.dataset.themeChoice === settings.theme)),
   )
@@ -155,6 +159,7 @@ function renderCard(b, c, card, index, total) {
 
   sec.append(body, foot, rail)
   refreshBadge(sec)
+  art.attach(sec)
   return sec
 }
 
@@ -203,6 +208,7 @@ function renderResult(verse, query) {
 
   sec.append(body, foot, rail)
   refreshBadge(sec)
+  art.attach(sec)
   return sec
 }
 
@@ -941,8 +947,13 @@ document.querySelectorAll('[data-theme-choice]').forEach(btn =>
     settings.theme = btn.dataset.themeChoice
     store.set('settings', settings)
     applyTheme()
+    art.refresh()
   }),
 )
+// Offer the Illustrated theme only when pictures ship with the app (the open-source repo has none until some are generated).
+art.available().then(found => {
+  $('[data-theme-choice="illustrated"]').hidden = !found && settings.theme !== 'illustrated'
+})
 $('#reset').addEventListener('click', () => {
   const syncNote = sync.isOn() ? ' Sync is turned off on this device; the synced copy and your other devices are not touched.' : ''
   if (!confirm(`Erase your place, saved passages, notes and settings on this device?${syncNote}`)) return

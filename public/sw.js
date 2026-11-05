@@ -1,9 +1,14 @@
 // Caches the app shell, plus each BSB book file the first time it is read (public domain, so reading
 // works offline afterwards). ESV text from /api/passage is never stored: its licence forbids it.
-const CACHE = 'bible-scroll-v17'
+const CACHE = 'bible-scroll-v18'
+// The Illustrated theme's pictures live in their own cache, so a new app version does not throw them away. Each is
+// stored the first time it is shown and never re-downloaded: a changed picture gets a new "?v=" in the manifest.
+const ART_CACHE = 'bible-scroll-art'
 const SHELL = [
   '/',
   '/app.js',
+  '/art.js',
+  '/artui.js',
   '/books.js',
   '/parse.js',
   '/sources.js',
@@ -36,7 +41,7 @@ self.addEventListener('activate', event => {
   event.waitUntil(
     caches
       .keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== ART_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim()),
   )
 })
@@ -46,6 +51,21 @@ self.addEventListener('fetch', event => {
   const { request } = event
   const url = new URL(request.url)
   if (request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return
+
+  // A picture: from the cache when it is there, otherwise fetch it once and keep it. (The manifest that lists them
+  // is not a picture and goes through the normal route below, so a new list is picked up.)
+  if (url.pathname.startsWith('/art/') && url.pathname !== '/art/manifest.json') {
+    event.respondWith(
+      caches.open(ART_CACHE).then(async cache => {
+        const cached = await cache.match(request)
+        if (cached) return cached
+        const res = await fetch(request)
+        if (res.ok) cache.put(request, res.clone())
+        return res
+      }),
+    )
+    return
+  }
 
   event.respondWith(
     caches.open(CACHE).then(async cache => {

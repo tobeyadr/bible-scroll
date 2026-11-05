@@ -73,6 +73,15 @@ The magnifier in the top bar (or `/` on a keyboard) opens a full-screen search p
 - From a verse: tap a word, or long-press and drag to select a few, in the reading feed or in search results. A "Search" chip appears under the words and opens search with them (several words become a quoted phrase). Double-tap still saves the passage. The logic is in `public/pick.js`.
 - The first search reads all 66 book files (about 4 MB, then cached by the service worker) and builds an in-memory verse index (`public/search.js`). Psalm title lines have no verse number, so they are not searched.
 
+## Illustrated theme
+
+Settings offers an **Illustrated** theme when pictures are present: a painted picture behind the text of each card, under a dark wash so the text stays readable. The repository ships the plan and the code but no pictures yet, so the option stays hidden until `public/art/manifest.json` lists some.
+
+- The plan is `art/images.json` (the style, and the 66 book pictures and 90 moments with their passages and prompts; see `art/README.md`). A book picture is the default, and a verse range, chapter or run of chapters overrides it. The narrowest match for a card's first verse wins (`public/art.js`).
+- `node scripts/build-art-manifest.mjs` writes `public/art/manifest.json` from the pictures that exist in `public/art/`, each with a `?v=` hash.
+- `public/artui.js` loads a picture before showing it, so a card never flashes a broken image, and fetches nothing at all in the other themes. The service worker keeps pictures in their own cache and serves them from it after the first look (`bible-scroll-art`, not cleared by app updates).
+- It is skipped when the browser asks to save data.
+
 ## Other notes
 
 - Saved passages store the reference, not the text, so they follow whichever translation is active.
