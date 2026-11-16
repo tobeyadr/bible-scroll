@@ -2,7 +2,9 @@
 //
 //   { v: 1,
 //     saved: { "<card key>": { b, c, v1, v2, u, d? } },
-//     notes: { "<id>":       { b, c, v1, v2, text, at, u, d? } },
+//     notes: { "<id>":       { b, c, v1, v2, text, at, u, p?, q?, h?, d? } },   (p: the note this replies to; q: the
+//                                                                              quoted words, h: their highlight)
+//     hl:    { "<id>":       { b, c, t, v1, s, v2, e, q, col, at, u, d? } },   (highlight.js says what these mean)
 //     pos:   { b, c, v, u } | null,
 //     read:  { "<book>.<chapter>": { r, n, u, z? } } }   (see read.js)
 //
@@ -14,7 +16,7 @@ import { mergeRead } from './read.js'
 
 export const TOMBSTONE_TTL = 180 * 24 * 60 * 60 * 1000
 
-export const emptyDoc = () => ({ v: 1, saved: {}, notes: {}, pos: null, read: {} })
+export const emptyDoc = () => ({ v: 1, saved: {}, notes: {}, hl: {}, pos: null, read: {} })
 
 const isObject = x => x && typeof x === 'object' && !Array.isArray(x)
 
@@ -23,6 +25,7 @@ export function normalizeDoc(doc) {
     v: 1,
     saved: isObject(doc?.saved) ? doc.saved : {},
     notes: isObject(doc?.notes) ? doc.notes : {},
+    hl: isObject(doc?.hl) ? doc.hl : {},
     pos: isObject(doc?.pos) ? doc.pos : null,
     read: isObject(doc?.read) ? doc.read : {},
   }
@@ -75,6 +78,7 @@ export function mergeDocs(a, b, now = Date.now()) {
     v: 1,
     saved: mergeMaps(x.saved, y.saved, now),
     notes: mergeMaps(x.notes, y.notes, now),
+    hl: mergeMaps(x.hl, y.hl, now),
     pos: newest(x.pos, y.pos),
     read: mergeReadMaps(x.read, y.read, now),
   }

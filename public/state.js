@@ -2,6 +2,7 @@
 // Settings stay separate: text size and theme are per device.
 import { emptyDoc, normalizeDoc } from './merge.js'
 import { BOOKS } from './books.js'
+import { DEFAULT_COLOR, contains, sameSpot } from './highlight.js'
 import { WHOLE, readKey, addRange, sameRanges, hasRange, chapterStatus } from './read.js'
 
 const KEY = 'bs:doc'
@@ -52,6 +53,17 @@ export function createState(storage) {
       .filter(([, item]) => !item.d)
       .map(([k, item]) => ({ k, ...item }))
 
+  // Groups notes (oldest first) under the note they reply to. A reply whose original is gone, say deleted on another
+  // device, stands on its own so it is never lost. Each result carries its replies and the time of the latest one.
+  const threads = notes => {
+    const ids = new Set(notes.map(n => n.k))
+    const roots = notes.filter(n => !n.p || !ids.has(n.p)).map(n => ({ ...n, replies: [] }))
+    const byId = new Map(roots.map(n => [n.k, n]))
+    for (const n of notes) if (n.p && byId.has(n.p)) byId.get(n.p).replies.push(n)
+    for (const root of roots) root.last = Math.max(root.u, ...root.replies.map(r => r.u))
+    return roots
+  }
+
   const newId = () =>
     globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 
@@ -79,22 +91,81 @@ export function createState(storage) {
       commit('local')
     },
 
-    noteList: () => live(doc.notes).sort((a, b) => b.u - a.u),
-    // Notes whose verses overlap the given range, oldest first.
+    // The notes to list: each original note once, most recently touched first (a reply counts as touching it).
+    noteList: () => threads(live(doc.notes)).sort((a, b) => b.last - a.last),
+    // Notes (and replies) whose verses overlap the given range, oldest first.
     notesFor: (b, c, v1, v2) =>
       live(doc.notes)
         .filter(n => n.b === b && n.c === c && n.v1 <= v2 && n.v2 >= v1)
         .sort((x, y) => x.at - y.at),
-    saveNote({ id, b, c, v1, v2, text }) {
+    // The same notes grouped for reading: each original note, newest first, with its replies oldest first.
+    threadsFor: (b, c, v1, v2) =>
+      threads(
+        live(doc.notes)
+          .filter(n => n.b === b && n.c === c && n.v1 <= v2 && n.v2 >= v1)
+          .sort((x, y) => x.at - y.at),
+      ).sort((x, y) => y.at - x.at),
+    // p is the note this one replies to. A reply always hangs off the original, never off another reply.
+    // q is words quoted from the passage, and h the highlight they came from.
+    saveNote({ id, b, c, v1, v2, text, p, q, h }) {
       const now = Date.now()
       const key = id || newId()
       const at = doc.notes[key]?.at ?? now
-      doc = { ...doc, notes: { ...doc.notes, [key]: { b, c, v1, v2, text, at, u: now } } }
+      const note = { b, c, v1, v2, text, at, u: now }
+      const parent = p && (doc.notes[p]?.p || p)
+      if (parent) note.p = parent
+      if (q) note.q = q
+      if (q && h) note.h = h
+      doc = { ...doc, notes: { ...doc.notes, [key]: note } }
       commit('local')
       return key
     },
+    // Deleting a note takes its replies with it.
     deleteNote(id) {
-      doc = { ...doc, notes: { ...doc.notes, [id]: { u: Date.now(), d: 1 } } }
+      const now = Date.now()
+      const gone = { [id]: { u: now, d: 1 } }
+      for (const [k, n] of Object.entries(doc.notes)) if (n.p === id && !n.d) gone[k] = { u: now, d: 1 }
+      doc = { ...doc, notes: { ...doc.notes, ...gone } }
+      commit('local')
+    },
+
+    // Highlights of one chapter in one translation, oldest first (so the newest is drawn on top).
+    highlightsFor: (b, c, t) =>
+      live(doc.hl)
+        .filter(h => h.b === b && h.c === c && h.t === t)
+        .sort((x, y) => x.at - y.at || (x.k < y.k ? -1 : 1))
+        .map(({ k, ...h }) => ({ id: k, ...h })),
+    // Highlights a new one completely covers are replaced by it, and the same words highlighted again just
+    // change colour. Returns the id of the highlight now on those words.
+    addHighlight({ b, c, t, v1, s, v2, e, q, col }) {
+      const now = Date.now()
+      const spot = { v1, s, v2, e }
+      const next = { ...doc.hl }
+      let id = null
+      for (const h of live(doc.hl)) {
+        if (h.b !== b || h.c !== c || h.t !== t) continue
+        if (sameSpot(h, spot)) {
+          id = h.k
+          next[id] = { ...doc.hl[id], col: col || h.col, u: now }
+        } else if (contains(spot, h)) {
+          next[h.k] = { u: now, d: 1 }
+        }
+      }
+      if (!id) {
+        id = newId()
+        next[id] = { b, c, t, v1, s, v2, e, q, col: col || DEFAULT_COLOR, at: now, u: now }
+      }
+      doc = { ...doc, hl: next }
+      commit('local')
+      return id
+    },
+    setHighlightColor(id, col) {
+      if (!doc.hl[id] || doc.hl[id].d) return
+      doc = { ...doc, hl: { ...doc.hl, [id]: { ...doc.hl[id], col, u: Date.now() } } }
+      commit('local')
+    },
+    removeHighlight(id) {
+      doc = { ...doc, hl: { ...doc.hl, [id]: { u: Date.now(), d: 1 } } }
       commit('local')
     },
 

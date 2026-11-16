@@ -13,6 +13,7 @@ import { initAsk } from './ask.js'
 import { snippet } from './search.js'
 import { createArt } from './artui.js'
 import { readKey, chapterStatus, chapterFraction, bookProgress } from './read.js'
+import { paintHighlights, anchorOfRange } from './highlight.js'
 
 // ---------- localStorage (everything is optional; the app works without it) ----------
 
@@ -144,6 +145,7 @@ function renderCard(b, c, card, index, total) {
   sec.dataset.v2 = card.v2
   sec.dataset.i = index
   sec.dataset.n = total
+  sec.dataset.t = source().id // highlights belong to the translation they were made in
   sec.style.setProperty('--h', (HUES[BOOKS[b].g] + ((c * 4) % 24)) % 360)
   sec.plain = plainText(card)
   sec.classList.toggle('read', state.hasRead(b, c, card.v1, card.v2))
@@ -162,8 +164,18 @@ function renderCard(b, c, card, index, total) {
 
   sec.append(body, foot, rail)
   refreshBadge(sec)
+  paintCard(sec)
   art.attach(sec)
   return sec
+}
+
+// Draws this card's highlights. Only the reading feed has them; search results show a snippet instead.
+function paintCard(sec) {
+  if (!sec.dataset.t) return
+  const { b, c, v1, v2 } = sec.dataset
+  const hls = state.highlightsFor(+b, +c, sec.dataset.t).filter(h => h.v1 <= +v2 && h.v2 >= +v1)
+  const text = $('.text', sec)
+  if (hls.length || text.querySelector('mark.hl')) paintHighlights(text, +v1, hls)
 }
 
 function railButton(act, label, aria, icon, cls = '') {
@@ -228,6 +240,7 @@ function refreshBadge(sec) {
 function refreshCards() {
   document.querySelectorAll('.card:not(.note)').forEach(sec => {
     refreshBadge(sec)
+    paintCard(sec)
     $('.heart', sec).classList.toggle('on', state.isSaved(cardKey(sec.dataset.b, sec.dataset.c, sec.dataset.v1, sec.dataset.v2)))
     sec.classList.toggle('read', state.hasRead(+sec.dataset.b, +sec.dataset.c, +sec.dataset.v1, +sec.dataset.v2))
   })
@@ -787,7 +800,12 @@ function renderSaved() {
   for (const item of items) {
     const li = make('li')
     const go = make('button', 'go', refLabel(item.b, item.c, item.v1, item.v2))
-    if (savedTab === 'notes') go.append(make('span', 'snippet', item.text))
+    if (savedTab === 'notes') {
+      if (item.q) go.append(make('span', 'snippet', `“${item.q}”`))
+      go.append(make('span', 'snippet', item.text))
+      const n = item.replies.length
+      if (n) go.append(make('span', 'snippet', `${n} ${n === 1 ? 'reply' : 'replies'}`))
+    }
     go.addEventListener('click', () => jump(item))
     li.append(go)
     if (savedTab === 'saved') {
@@ -820,7 +838,49 @@ wireCards($('#searchResults'), {
 })
 $('#searchBtn').addEventListener('click', () => searchUI.open())
 // Tap a word, or select a few, in the feed or in search results to search for them.
-const wordPicker = initPicker({ containers: [feed, $('#searchResults')], onSearch: text => searchUI.open(text) })
+// Highlights: coloured marks on selected words, tied to the card (and translation) they were made on.
+function anchorFor(range) {
+  const start = range.startContainer
+  const sec = (start.nodeType === 1 ? start : start.parentElement)?.closest('.card')
+  if (!sec?.dataset.t) return null
+  const found = anchorOfRange($('.text', sec), +sec.dataset.v1, range)
+  return found && { sec, anchor: { b: +sec.dataset.b, c: +sec.dataset.c, t: sec.dataset.t, ...found } }
+}
+
+const marks = {
+  container: feed,
+  add(range, color) {
+    const hit = anchorFor(range)
+    if (!hit) return
+    state.addHighlight({ ...hit.anchor, col: color })
+    refreshCards()
+  },
+  // Notes can quote words that are not highlighted yet; they get the default colour so the quote has a place.
+  note(range) {
+    const hit = anchorFor(range)
+    if (!hit) return
+    const h = state.addHighlight(hit.anchor)
+    refreshCards()
+    openNotes(hit.sec, { q: hit.anchor.q, h, v1: hit.anchor.v1, v2: hit.anchor.v2 })
+  },
+  noteOn(id) {
+    const h = state.snapshot().hl[id]
+    if (!h || h.d) return
+    const sec = [...feed.querySelectorAll('.card:not(.note)')].find(
+      s => s.dataset.t === h.t && +s.dataset.b === h.b && +s.dataset.c === h.c && +s.dataset.v1 <= h.v2 && +s.dataset.v2 >= h.v1,
+    )
+    if (sec) openNotes(sec, { q: h.q, h: id, v1: h.v1, v2: h.v2 })
+  },
+  recolor(id, color) {
+    state.setHighlightColor(id, color)
+    refreshCards()
+  },
+  remove(id) {
+    state.removeHighlight(id)
+    refreshCards()
+  },
+}
+const wordPicker = initPicker({ containers: [feed, $('#searchResults')], onSearch: text => searchUI.open(text), marks })
 document.addEventListener('keydown', event => {
   if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return
   if (document.querySelector('dialog[open]') || searchUI.isOpen() || /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) return
@@ -832,6 +892,8 @@ document.addEventListener('keydown', event => {
 const notesSheet = $('#notesSheet')
 let noteTarget = null // { b, c, v1, v2 } of the card the sheet was opened from
 let editingId = null
+let replyingTo = null
+let quoting = null // { q, h, v1, v2 }: words from the passage the next note will quote
 const NOTE_MAX = 2000
 
 // Reads like a comment thread: newest first, "You" with a time, and a composer pinned underneath.
@@ -861,21 +923,33 @@ function resizeComposer() {
   composer.send.disabled = !composer.field.value.trim()
 }
 
-function setEditing(note) {
-  editingId = note ? note.k : null
-  composer.banner.hidden = !note
-  composer.field.value = note ? note.text : ''
-  composer.field.placeholder = 'Add a note…'
+// The composer writes a new note, edits one (editingId), replies to one (replyingTo), or quotes words (quoting).
+function setComposer({ edit = null, reply = null, quote = null } = {}) {
+  editingId = edit ? edit.k : null
+  replyingTo = reply ? reply.k : null
+  quoting = quote
+  composer.banner.hidden = !edit && !reply && !quote
+  composer.banner.firstElementChild.textContent = reply
+    ? `Replying to “${snippetOf(reply.text)}”`
+    : quote
+      ? `Note on “${snippetOf(quote.q)}”`
+      : 'Editing your note'
+  composer.field.value = edit ? edit.text : ''
+  composer.field.placeholder = reply ? 'Add a reply…' : quote ? 'Add a note on these words…' : 'Add a note…'
   resizeComposer()
-  if (note) composer.field.focus()
+  if (edit || reply || quote) composer.field.focus()
 }
 
-function openNotes(sec) {
+const setEditing = note => setComposer({ edit: note })
+const snippetOf = text => (text.length > 40 ? `${text.slice(0, 40).trimEnd()}…` : text)
+
+function openNotes(sec, quote = null) {
   noteTarget = { b: +sec.dataset.b, c: +sec.dataset.c, v1: +sec.dataset.v1, v2: +sec.dataset.v2 }
   setEditing(null)
   renderNotesFeed()
   openSheet(notesSheet)
   resizeComposer() // measured once the sheet is on screen
+  if (quote) setComposer({ quote })
 }
 
 // A note's text, with scripture references in it ("John 3:16", "1 Cor 13:4-7") as links that open that verse.
@@ -902,11 +976,12 @@ function noteText(text) {
 
 function renderNotesFeed(freshId) {
   const { b, c, v1, v2 } = noteTarget
-  const notes = state.notesFor(b, c, v1, v2).reverse() // newest first
-  $('h2', notesSheet).replaceChildren(`${notes.length} ${notes.length === 1 ? 'note' : 'notes'}`, make('small', 'ref-sub', refLabel(b, c, v1, v2)))
+  const threads = state.threadsFor(b, c, v1, v2) // newest first, each with its replies oldest first
+  const total = threads.reduce((sum, t) => sum + 1 + t.replies.length, 0)
+  $('h2', notesSheet).replaceChildren(`${total} ${total === 1 ? 'note' : 'notes'}`, make('small', 'ref-sub', refLabel(b, c, v1, v2)))
 
   const body = $('.sheet-body', notesSheet)
-  if (!notes.length) {
+  if (!threads.length) {
     const empty = make('div', 'empty-feed')
     empty.innerHTML = ICON.note
     empty.append(make('p', null, 'No notes yet. Write what this passage means to you. A reference like John 3:16 becomes a link.'))
@@ -914,32 +989,54 @@ function renderNotesFeed(freshId) {
     return
   }
 
-  const list = make('ul', 'feed-list')
-  for (const note of notes) {
-    const li = make('li', 'cmt' + (note.k === freshId ? ' fresh' : ''))
+  // One note, or one reply (a smaller entry, with no Reply button of its own: replies all hang off the original).
+  const entry = (note, freshId, isReply) => {
+    const li = make('li', `cmt${isReply ? ' reply' : ''}${note.k === freshId ? ' fresh' : ''}`)
     li.append(make('div', 'avatar'))
 
     const head = make('div', 'cmt-head')
     head.append(make('strong', null, 'You'), make('span', 'cmt-time', timeAgo(note.at)))
     if (note.u - note.at > 60000) head.append(make('span', 'cmt-time', '· edited'))
-    if (note.v1 !== v1 || note.v2 !== v2) head.append(make('span', 'cmt-ref', refLabel(note.b, note.c, note.v1, note.v2)))
+    if (!isReply && (note.v1 !== v1 || note.v2 !== v2)) head.append(make('span', 'cmt-ref', refLabel(note.b, note.c, note.v1, note.v2)))
 
     const actions = make('div', 'cmt-actions')
+    if (!isReply) {
+      const reply = make('button', null, 'Reply')
+      reply.addEventListener('click', () => setComposer({ reply: note }))
+      actions.append(reply)
+    }
     const edit = make('button', null, 'Edit')
     edit.addEventListener('click', () => setEditing(note))
     const del = make('button', null, 'Delete')
     del.addEventListener('click', () => {
-      if (!confirm('Delete this note?')) return
+      const n = note.replies?.length || 0
+      if (!confirm(n ? `Delete this note and its ${n === 1 ? 'reply' : `${n} replies`}?` : `Delete this ${isReply ? 'reply' : 'note'}?`)) return
       state.deleteNote(note.k)
-      if (editingId === note.k) setEditing(null)
+      if (editingId === note.k || replyingTo === note.k) setEditing(null)
       refreshCards()
       renderNotesFeed()
     })
     actions.append(edit, del)
 
     const main = make('div', 'cmt-main')
-    main.append(head, noteText(note.text), actions)
+    if (note.q) {
+      const hl = state.snapshot().hl[note.h]
+      main.append(head, make('blockquote', `cmt-quote${hl && !hl.d ? ` hl-${hl.col}` : ''}`, note.q), noteText(note.text), actions)
+    } else {
+      main.append(head, noteText(note.text), actions)
+    }
     li.append(main)
+    return li
+  }
+
+  const list = make('ul', 'feed-list')
+  for (const note of threads) {
+    const li = entry(note, freshId, false)
+    if (note.replies.length) {
+      const replies = make('ul', 'feed-list replies')
+      for (const reply of note.replies) replies.append(entry(reply, freshId, true))
+      $('.cmt-main', li).append(replies)
+    }
     list.append(li)
   }
   body.replaceChildren(list)
@@ -948,13 +1045,27 @@ function renderNotesFeed(freshId) {
 function postNote() {
   const text = composer.field.value.trim()
   if (!text) return
-  const existing = editingId && state.snapshot().notes[editingId]
-  const range = existing ? { b: existing.b, c: existing.c, v1: existing.v1, v2: existing.v2 } : noteTarget
-  const id = state.saveNote({ id: editingId, ...range, text })
+  const notes = state.snapshot().notes
+  const existing = editingId && notes[editingId]
+  // A reply lands on the same passage as the note it answers (which may have been deleted from another device meanwhile).
+  const parent = replyingTo && notes[replyingTo] && !notes[replyingTo].d ? replyingTo : null
+  const source = existing || (parent && notes[parent])
+  // A note on quoted words belongs to the verses those words are in.
+  const range = source
+    ? { b: source.b, c: source.c, v1: source.v1, v2: source.v2 }
+    : quoting
+      ? { b: noteTarget.b, c: noteTarget.c, v1: quoting.v1, v2: quoting.v2 }
+      : noteTarget
+  const p = existing ? existing.p : parent
+  const quote = existing ? { q: existing.q, h: existing.h } : { q: quoting?.q, h: quoting?.h }
+  const id = state.saveNote({ id: editingId, ...range, text, p, ...quote })
+  const isReply = !!p
   setEditing(null)
   refreshCards()
   renderNotesFeed(id)
-  $('.sheet-body', notesSheet).scrollTop = 0
+  const body = $('.sheet-body', notesSheet)
+  if (isReply) $('.fresh', body)?.scrollIntoView({ block: 'nearest' })
+  else body.scrollTop = 0
 }
 
 composer.field.maxLength = NOTE_MAX
@@ -968,7 +1079,7 @@ composer.field.addEventListener('keydown', event => {
 composer.send.addEventListener('click', postNote)
 $('#noteEditing button').addEventListener('click', () => setEditing(null))
 
-// questions about one passage (Workers AI through /api/ask)
+// questions about one passage (OpenAI through /api/ask)
 const askSheet = $('#askSheet')
 const asker = initAsk({
   sheet: askSheet,
@@ -1064,7 +1175,7 @@ $('#clearRead').addEventListener('click', () => {
 })
 $('#reset').addEventListener('click', () => {
   const syncNote = sync.isOn() ? ' Sync is turned off on this device; the synced copy and your other devices are not touched.' : ''
-  if (!confirm(`Erase your place, saved passages, notes and settings on this device?${syncNote}`)) return
+  if (!confirm(`Erase your place, saved passages, notes, highlights and settings on this device?${syncNote}`)) return
   store.clear()
   location.reload()
 })

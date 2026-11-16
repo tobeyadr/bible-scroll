@@ -75,6 +75,66 @@ test('state: notes overlap by verse range, edits keep their creation time, delet
   assert.equal(state.snapshot().notes[id].d, 1)
 })
 
+test('state: replies hang off the original note and stay on its passage', () => {
+  const state = createState(memory())
+  const tick = () => {
+    for (const t = Date.now(); Date.now() === t; );
+  } // notes made in one millisecond would tie
+  const first = state.saveNote({ b: 42, c: 3, v1: 16, v2: 18, text: 'first' })
+  tick()
+  const second = state.saveNote({ b: 42, c: 3, v1: 16, v2: 18, text: 'second' })
+  tick()
+  const r1 = state.saveNote({ b: 42, c: 3, v1: 16, v2: 18, text: 'more on first', p: first })
+  tick()
+  // a reply to a reply joins the same thread
+  const r2 = state.saveNote({ b: 42, c: 3, v1: 16, v2: 18, text: 'and again', p: r1 })
+  tick()
+  assert.equal(state.snapshot().notes[r2].p, first)
+
+  const threads = state.threadsFor(42, 3, 16, 16)
+  assert.deepEqual(threads.map(t => t.text), ['second', 'first']) // newest original first
+  assert.deepEqual(threads[1].replies.map(r => r.text), ['more on first', 'and again']) // replies in order
+  assert.equal(threads[0].replies.length, 0)
+  assert.equal(state.notesFor(42, 3, 16, 16).length, 4) // the badge counts replies too
+
+  // editing a reply keeps it a reply
+  state.saveNote({ id: r1, b: 42, c: 3, v1: 16, v2: 18, text: 'edited reply', p: state.snapshot().notes[r1].p })
+  assert.equal(state.snapshot().notes[r1].p, first)
+
+  // the list shows originals only, most recently touched first, and a reply counts as touching it
+  assert.deepEqual(state.noteList().map(n => n.k), [first, second])
+  assert.equal(state.noteList()[0].replies.length, 2)
+
+  // deleting a note deletes its replies
+  state.deleteNote(first)
+  assert.equal(state.notesFor(42, 3, 16, 16).length, 1)
+  assert.equal(state.snapshot().notes[r1].d, 1)
+  assert.equal(state.snapshot().notes[r2].d, 1)
+  assert.equal(state.snapshot().notes[second].d, undefined)
+})
+
+test('state: a reply whose original was deleted elsewhere stands on its own', () => {
+  const state = createState(memory())
+  const id = state.saveNote({ b: 1, c: 1, v1: 1, v2: 1, text: 'original' })
+  state.saveNote({ b: 1, c: 1, v1: 1, v2: 1, text: 'reply made on a phone', p: id })
+  // the other device deleted the original without knowing about the reply
+  const theirs = doc({ notes: { [id]: { u: Date.now() + 1000, d: 1 } } })
+  const merged = mergeDocs(state.snapshot(), theirs)
+  const after = createState(memory({ 'bs:doc': JSON.stringify(merged) }))
+  assert.deepEqual(after.threadsFor(1, 1, 1, 1).map(t => t.text), ['reply made on a phone'])
+  assert.equal(after.noteList().length, 1)
+})
+
+test('merge keeps replies written on two devices', () => {
+  const orig = note('original', 100)
+  const a = doc({ notes: { o: orig, ra: { ...note('from a', 200), p: 'o' } } })
+  const b = doc({ notes: { o: orig, rb: { ...note('from b', 210), p: 'o' } } })
+  const m = mergeDocs(a, b, 1000)
+  assert.deepEqual(Object.keys(m.notes).sort(), ['o', 'ra', 'rb'])
+  assert.ok(sameDoc(m, mergeDocs(b, a, 1000)))
+  assert.equal(m.notes.ra.p, 'o')
+})
+
 test('state: saved passages toggle and notify listeners', () => {
   const state = createState(memory())
   const seen = []
