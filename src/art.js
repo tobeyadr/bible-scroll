@@ -28,10 +28,14 @@ export const PROVIDERS = {
     key: 'OPENAI_API_KEY',
     url: 'https://api.openai.com/v1/images/generations',
     body: (env, prompt) => ({
-      model: env.ART_MODEL || 'gpt-image-2',
+      // gpt-image-2 is removed from the API on 10 Feb 2027; OpenAI names gpt-image-2.6-sunburst (detailed
+      // compositions) and gpt-image-2.6-flare (fast iteration) as its replacements.
+      model: env.ART_MODEL || 'gpt-image-2.6-sunburst',
       prompt,
       size: `${plan.size.width}x${plan.size.height}`,
       quality: env.ART_QUALITY || 'medium',
+      // The 2.6 models also take a separate complexity (low, medium or high; high when left out).
+      complexity: env.ART_COMPLEXITY || 'medium',
       output_format: 'webp',
       output_compression: 80,
       n: 1,

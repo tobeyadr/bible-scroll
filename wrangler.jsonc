@@ -9,8 +9,8 @@
   },
   // Holds the encrypted sync blobs (see src/sync.js). Created automatically on first deploy.
   "d1_databases": [{ "binding": "DB", "database_name": "bible-scroll" }],
-  // Workers AI answers the "Ask about this passage" questions (src/ask.js). No key: the binding is the credential.
-  "ai": { "binding": "AI" },
+  // The "Ask about this passage" questions (src/ask.js) and the Illustrated theme's pictures (src/art.js) call
+  // OpenAI with the OPENAI_API_KEY secret: npx wrangler secret put OPENAI_API_KEY
   "ratelimits": [
     // Per-IP limit on sync requests.
     { "name": "SYNC_LIMITER", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } },

@@ -1,8 +1,10 @@
 # Copy to .dev.vars for `npm run dev`. For production use: npx wrangler secret put ESV_API_KEY
 ESV_API_KEY=your-esv-api-key
 
-# Illustrated theme: pictures are painted on demand. Set one of these (production: npx wrangler secret put OPENAI_API_KEY).
+# Ask sAInt (questions about a passage) and the Illustrated theme's pictures use OpenAI
+# (production: npx wrangler secret put OPENAI_API_KEY). Pictures can use XAI_API_KEY instead.
 # OPENAI_API_KEY=your-openai-api-key
 # XAI_API_KEY=your-xai-api-key
-# Optional: ART_PROVIDER=openai|xai, ART_MODEL, ART_QUALITY (OpenAI), ART_DAILY_LIMIT (default 40),
+# Optional for Ask: ASK_MODEL, ASK_REASONING (low by default, "off" to omit), ASK_DAILY_LIMIT (default 40), ASK_API_URL
+# Optional: ART_PROVIDER=openai|xai, ART_MODEL, ART_QUALITY and ART_COMPLEXITY (OpenAI), ART_DAILY_LIMIT (default 40),
 # ART_API_URL (send image requests somewhere else, such as a local test double)

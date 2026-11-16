@@ -1,25 +1,23 @@
 import { BOOKS, refLabel } from '../public/books.js'
 
-// "Ask about this passage": a study companion on Cloudflare Workers AI. There is no API key; the AI binding
-// in wrangler.jsonc is the credential. The model is a setting (ASK_MODEL) so it can change without a code edit.
-export const DEFAULT_MODEL = '@cf/openai/gpt-oss-120b'
+// "Ask about this passage": a study companion on OpenAI's chat completions API. The key is the OPENAI_API_KEY secret
+// (npx wrangler secret put OPENAI_API_KEY), the same one the Illustrated theme's pictures use. The model is a
+// setting (ASK_MODEL) so it can change without a code edit.
+export const DEFAULT_MODEL = 'gpt-5.5'
+export const API_URL = 'https://api.openai.com/v1/chat/completions'
 
-// Reasoning models think before they answer, and that thinking counts against max_tokens, so questions about a
-// verse (which need recall more than deliberation) ask for as little of it as the model allows.
-const MODEL_PARAMS = {
-  '@cf/openai/gpt-oss-120b': { reasoning: { effort: 'low' } },
-  '@cf/moonshotai/kimi-k2.6': { reasoning_effort: 'none' },
-  '@cf/deepseek-ai/deepseek-v4-pro-0813': { reasoning_effort: 'none' },
-}
-
-// Questions a day, all devices together (ASK_DAILY_LIMIT overrides it). At roughly a fifth of a cent each, 40 is
-// about 8 cents a day at most.
+// Questions a day, all devices together (ASK_DAILY_LIMIT overrides it). Each one costs a cent or two, so 40 keeps
+// the day's bill to well under a dollar.
 export const DAILY_LIMIT = 40
 
 const LIMIT = { body: 24000, passage: 2000, question: 600, answer: 6000, turns: 12, label: 24 }
 
-// After editing this, ask a real question (see README). With some wordings, gpt-oss-120b answers with nothing but
-// "!!!!!" until max_tokens runs out; it did when a sentence quoted example replies with apostrophes.
+// A reasoning model thinks before it answers, and the thinking counts against max_completion_tokens as well as the
+// bill. Questions about a verse need recall more than deliberation, so ask for little of it (ASK_REASONING changes
+// the level, and "off" leaves it out for a model that has no such setting) and leave room for the answer.
+const MAX_TOKENS = 2500
+const TIMEOUT_MS = 90 * 1000
+
 export const SYSTEM = `You are sAInt, a study companion inside a Bible reading app, helping one reader understand the passage they are looking at. The passage is quoted in their first message.
 
 How to answer:
@@ -65,13 +63,15 @@ export function parseAsk(body) {
   return { messages: [{ role: 'system', content: SYSTEM }, ...messages] }
 }
 
-// Workers AI streams server-sent events. Depending on the model each event carries the next piece of text as
-// `response` or as an OpenAI-style `choices[0].delta.content`; the app gets plain text either way.
+// The model likes non-breaking hyphens and spaces, which only make odd line breaks and missing glyphs.
+const tidyText = text => text.replace(/[‐‑]/g, '-').replace(/[  ]/g, ' ')
+
+// The API streams server-sent events, each carrying the next piece of the answer as `choices[0].delta.content`.
+// The app gets plain text.
 export function sseToText(stream) {
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
   let buffer = ''
-  const answer = answerFilter()
 
   const emit = (line, controller) => {
     if (!line.startsWith('data:')) return
@@ -83,10 +83,9 @@ export function sseToText(stream) {
     } catch {
       return
     }
-    const text = chunk.response ?? chunk.choices?.[0]?.delta?.content
-    if (typeof text === 'string' && text) send(answer.push(text), controller)
+    const text = chunk.choices?.[0]?.delta?.content
+    if (typeof text === 'string' && text) controller.enqueue(encoder.encode(tidyText(text)))
   }
-  const send = (text, controller) => text && controller.enqueue(encoder.encode(text))
 
   return stream.pipeThrough(
     new TransformStream({
@@ -98,110 +97,37 @@ export function sseToText(stream) {
       },
       flush(controller) {
         emit(buffer.trim(), controller)
-        send(answer.end(), controller)
       },
     }),
   )
 }
 
-// gpt-oss writes its reasoning to a separate field, which is dropped above. Now and then the markers between its
-// reasoning and its answer are lost and the reasoning arrives as part of the answer, as "analysis" then the
-// thinking, then "assistantfinal" and the real answer. An answer never starts with a lowercase "analysis", so
-// that is the sign: hold the text back until the marker shows up, drop what came before it, and carry on. If the
-// marker never comes the held text is shown rather than nothing. Typographic clean-up happens here too: the model
-// likes non-breaking hyphens and spaces, which only make odd line breaks and missing glyphs.
-const LEAK_START = /^(analysis|commentary)/
-const FINAL_MARKER = /assistant\s*final|<\|channel\|>\s*final\s*<\|message\|>/i
-const tidyText = text => text.replace(/[‐‑]/g, '-').replace(/[  ]/g, ' ')
-
-export function answerFilter() {
-  let mode = 'detect' // detect -> pass, or detect -> leak -> pass
-  let held = ''
-
-  return {
-    push(text) {
-      if (mode === 'pass') return tidyText(text)
-      held += text
-      if (mode === 'detect') {
-        const head = held.trimStart()
-        if (head.length < 10) return '' // too early to tell
-        if (!LEAK_START.test(head)) {
-          mode = 'pass'
-          const text = held
-          held = ''
-          return tidyText(text)
-        }
-        mode = 'leak'
-      }
-      const marker = FINAL_MARKER.exec(held)
-      if (!marker) return ''
-      mode = 'pass'
-      const rest = held.slice(marker.index + marker[0].length).trimStart()
-      held = ''
-      return tidyText(rest)
-    },
-    // What is still held when the stream ends.
-    end() {
-      const rest = mode === 'leak' ? held.trimStart().replace(LEAK_START, '').trimStart() : held
-      held = ''
-      mode = 'pass'
-      return tidyText(rest)
-    },
-  }
+// What goes to the API for one question.
+export function requestFor(env, messages) {
+  const body = { model: env.ASK_MODEL || DEFAULT_MODEL, messages, stream: true, max_completion_tokens: MAX_TOKENS }
+  const effort = env.ASK_REASONING || 'low'
+  if (effort !== 'off') body.reasoning_effort = effort
+  return body
 }
 
-const TRIES = 3
-// A normal answer starts within 5 to 12 seconds. A stuck one can sit silent for a minute before it shows.
-const FIRST_WORDS_MS = 30000
-
-// One character repeated over and over at the start is the model stuck, never a real answer.
-export const isStuck = text => /^(\S)\1{7,}/.test(text.trimStart())
-
-// Reads the first words of an answer. If they are fine, returns the whole answer as a stream (those words first,
-// then the rest as it arrives); if the model is stuck or too slow to start, cancels it and returns null.
-export async function startAnswer(text, waitMs = FIRST_WORDS_MS) {
-  const reader = text.getReader()
-  const decoder = new TextDecoder()
-  const first = []
-  const deadline = Date.now() + waitMs
-  let seen = ''
-  let ended = false
-  let late = false
-  while (seen.trim().length < 12 && !ended && !late) {
-    let timer
-    const next = await Promise.race([
-      reader.read(),
-      new Promise(resolve => (timer = setTimeout(() => resolve(null), Math.max(0, deadline - Date.now())))),
-    ])
-    clearTimeout(timer)
-    if (!next) late = true
-    else if (next.done) ended = true
-    else {
-      first.push(next.value)
-      seen += decoder.decode(next.value, { stream: true })
-    }
-  }
-  if (late || isStuck(seen)) {
-    await reader.cancel().catch(() => {})
-    return null
-  }
-  return new ReadableStream({
-    start(controller) {
-      for (const chunk of first) controller.enqueue(chunk)
-      if (ended) controller.close()
-    },
-    async pull(controller) {
-      if (ended) return
-      const { done, value } = await reader.read()
-      if (done) controller.close()
-      else controller.enqueue(value)
-    },
-    cancel: reason => reader.cancel(reason),
+// Calls the API and returns the answer as a stream of plain text. Throws with the API's own reason if it refuses.
+export async function askModel(env, messages) {
+  const res = await fetch(env.ASK_API_URL || API_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestFor(env, messages)),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   })
+  if (!res.ok) {
+    const detail = await res.json().then(b => b.error?.message || '', () => '')
+    throw new Error(`OpenAI ${res.status}${detail ? `: ${String(detail).slice(0, 240)}` : ''}`)
+  }
+  if (!res.body) throw new Error('OpenAI sent no answer')
+  return sseToText(res.body)
 }
 
 export async function handleAsk(request, env) {
-  if (!env.AI) return json({ error: 'AI is not configured' }, 500)
+  if (!env.OPENAI_API_KEY) return json({ error: 'sAInt is not set up on this server.' }, 500)
 
   // Every question costs money, so one address only gets a few a minute.
   const ip = request.headers.get('CF-Connecting-IP') || 'local'
@@ -225,24 +151,13 @@ export async function handleAsk(request, env) {
   const quota = await takeQuestion(env)
   if (quota.error) return json({ error: quota.error }, quota.status)
 
-  let stream = null
+  let stream
   try {
-    const model = env.ASK_MODEL || DEFAULT_MODEL
-    const params = { messages, stream: true, max_tokens: 1200, temperature: 0.4, ...MODEL_PARAMS[model] }
-    // The model sometimes gets stuck repeating one character. That shows in the first words, so look at them and
-    // try again (quietly, and without using another of the day's questions) rather than hand over junk.
-    for (let attempt = 1; attempt <= TRIES && !stream; attempt++) {
-      stream = await startAnswer(sseToText(await env.AI.run(model, params)))
-      if (!stream) console.warn(`ask: stuck answer, attempt ${attempt} of ${TRIES}`)
-    }
+    stream = await askModel(env, messages)
   } catch (err) {
     console.error('ask failed', err)
     await giveBackQuestion(env, quota.day)
     return json({ error: 'sAInt is not available right now. Try again later.' }, 502)
-  }
-  if (!stream) {
-    await giveBackQuestion(env, quota.day)
-    return json({ error: 'sAInt got stuck on that one. Try asking again.' }, 502)
   }
 
   return new Response(stream, {
