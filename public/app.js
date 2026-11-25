@@ -1,5 +1,5 @@
 import { BOOKS, HUES, OT_COUNT, nextChapter, prevChapter, refLabel, slug, parseHash } from './books.js'
-import { parseChapter, plainText } from './parse.js'
+import { parseChapter, plainText, passageText } from './parse.js'
 import { SOURCES } from './sources.js'
 import { ENABLED, DEFAULT_TRANSLATION, SHOW_SHARE, SHOW_ASK } from './config.js'
 import { $, make } from './dom.js'
@@ -796,6 +796,47 @@ function renderSaved() {
     return
   }
 
+  // Saved passages show the opening words under the reference, like a search result, so they can be told apart
+  // without opening each one. The text is fetched as a row scrolls into view, not all at once.
+  if (savedTab === 'saved') {
+    const lazy =
+      'IntersectionObserver' in window
+        ? new IntersectionObserver(
+            seen => {
+              for (const entry of seen) {
+                if (!entry.isIntersecting) continue
+                lazy.unobserve(entry.target)
+                fillPreview(entry.target)
+              }
+            },
+            { rootMargin: '300px' },
+          )
+        : null
+    const saved = make('ul', 'list saved')
+    for (const item of items) {
+      const li = make('li', 'saved-item')
+      const ref = refLabel(item.b, item.c, item.v1, item.v2)
+      const go = make('button', 'go')
+      const preview = make('span', 'hit-text')
+      Object.assign(preview.dataset, { b: item.b, c: item.c, v1: item.v1, v2: item.v2 })
+      go.append(make('span', 'hit-ref', ref), preview)
+      go.addEventListener('click', () => jump(item))
+      const rm = make('button', 'rm', '×')
+      rm.setAttribute('aria-label', `Remove ${ref}`)
+      rm.addEventListener('click', () => {
+        state.setSaved(item, false)
+        refreshCards()
+        renderSaved()
+      })
+      li.append(go, rm)
+      saved.append(li)
+      if (lazy) lazy.observe(preview)
+      else fillPreview(preview)
+    }
+    body.replaceChildren(tabs, saved)
+    return
+  }
+
   const list = make('ul', 'list')
   for (const item of items) {
     const li = make('li')
@@ -808,19 +849,18 @@ function renderSaved() {
     }
     go.addEventListener('click', () => jump(item))
     li.append(go)
-    if (savedTab === 'saved') {
-      const rm = make('button', 'rm', '×')
-      rm.setAttribute('aria-label', `Remove ${refLabel(item.b, item.c, item.v1, item.v2)}`)
-      rm.addEventListener('click', () => {
-        state.setSaved(item, false)
-        refreshCards()
-        renderSaved()
-      })
-      li.append(rm)
-    }
     list.append(li)
   }
   body.replaceChildren(tabs, list)
+}
+
+// Fills in the opening words of a saved passage, in the translation being read. If the text can't be fetched
+// (offline, or the ESV service is down) the reference alone stays.
+async function fillPreview(el) {
+  const { b, c, v1, v2 } = el.dataset
+  try {
+    el.textContent = passageText(await loadChapter(+b, +c), +v1, +v2)
+  } catch {}
 }
 
 $('#savedBtn').addEventListener('click', () => {
@@ -837,7 +877,6 @@ wireCards($('#searchResults'), {
   },
 })
 $('#searchBtn').addEventListener('click', () => searchUI.open())
-// Tap a word, or select a few, in the feed or in search results to search for them.
 // Highlights: coloured marks on selected words, tied to the card (and translation) they were made on.
 function anchorFor(range) {
   const start = range.startContainer
@@ -880,6 +919,7 @@ const marks = {
     refreshCards()
   },
 }
+// Tap a word, or select a few, in the feed or in search results to search for them or highlight them.
 const wordPicker = initPicker({ containers: [feed, $('#searchResults')], onSearch: text => searchUI.open(text), marks })
 document.addEventListener('keydown', event => {
   if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return

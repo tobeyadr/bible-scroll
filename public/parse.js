@@ -113,6 +113,19 @@ export function parseChapter(raw) {
   return cards
 }
 
+// The words of verses v1 to v2 of a parsed chapter as one line, verse numbers left out. A verse the translation
+// does not have is skipped, so a passage saved in another translation still shows what is there.
+export function passageText(cards, v1, v2) {
+  const all = cards.flatMap(card => card.blocks.flatMap(b => b.lines.map(l => l.t))).join(' ')
+  const parts = all.split(/\[(\d+)\]/) // text, number, text, number, ...
+  const words = []
+  for (let i = 1; i < parts.length; i += 2) {
+    const n = Number(parts[i])
+    if (n >= v1 && n <= v2) words.push(parts[i + 1])
+  }
+  return words.join(' ').replace(/\s+/g, ' ').trim()
+}
+
 export const plainText = card =>
   card.blocks
     .map(b => b.lines.map(l => l.t).join('\n'))

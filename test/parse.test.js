@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseChapter, plainText } from '../public/parse.js'
+import { parseChapter, plainText, passageText } from '../public/parse.js'
 import { parseHash, nextChapter, prevChapter } from '../public/books.js'
 
 const prose = n => Array.from({ length: n }, (_, i) => `[${i + 1}] ${'word '.repeat(12).trim()}.`).join(' ')
@@ -38,6 +38,17 @@ test('a verse that continues past a card keeps the previous verse number', () =>
 test('plainText strips verse numbers', () => {
   const [card] = parseChapter('[16] For God so loved the world.')
   assert.equal(plainText(card), 'For God so loved the world.')
+})
+
+test('passageText gives the words of a verse range across cards, without verse numbers', () => {
+  const cards = parseChapter(`[1] In the beginning.\n\n[2] The earth was without form.\n\n[3] And God said.\n\n[4] And God saw ${'x'.repeat(380)}.`)
+  assert.equal(passageText(cards, 2, 3), 'The earth was without form. And God said.')
+  assert.equal(passageText(cards, 1, 1), 'In the beginning.')
+  assert.ok(passageText(cards, 3, 4).startsWith('And God said. And God saw'))
+  assert.equal(passageText(cards, 9, 12), '') // verses this translation does not have
+  // poetry lines are joined with a space
+  const [psalm] = parseChapter('  [1] Blessed is the man\n    who walks not\n\n  [2] but his delight')
+  assert.equal(passageText([psalm], 1, 1), 'Blessed is the man who walks not')
 })
 
 test('deep links resolve to the longest matching book', () => {

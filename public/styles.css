@@ -449,6 +449,13 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .list li { display: flex; align-items: center; gap: 8px; }
 .list .go { flex: 1; text-align: left; padding: 14px 16px; border-radius: 12px; background: var(--glass); font-weight: 600; }
 .list .rm { width: 40px; height: 40px; border-radius: 50%; background: var(--glass); font-size: 1.2rem; }
+/* Saved passages: the reference, then the opening words, with the remove button in the corner */
+.list.saved .saved-item { position: relative; display: block; }
+.list.saved .go { display: block; width: 100%; padding: 12px 56px 14px 16px; }
+.list.saved .go:active { background: var(--glass-strong); }
+.list.saved .hit-text { min-height: 1.45em; font-weight: 400; } /* keeps the row's height steady while the words load */
+.list.saved .rm { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; background: none; color: var(--muted); }
+.list.saved .rm:active { background: var(--glass-strong); }
 .empty { color: var(--muted); text-align: center; padding: 30px 10px; line-height: 1.5; }
 
 .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; font-weight: 600; }

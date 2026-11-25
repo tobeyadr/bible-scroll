@@ -1,6 +1,6 @@
 // Caches the app shell, plus each BSB book file the first time it is read (public domain, so reading
 // works offline afterwards). ESV text from /api/passage is never stored: its licence forbids it.
-const CACHE = 'bible-scroll-v23'
+const CACHE = 'bible-scroll-v24'
 // The Illustrated theme's pictures live in their own cache, so a new app version does not throw them away. Each is
 // stored the first time it is shown and never re-downloaded: a redone picture has a new "?v=" in its address.
 const ART_CACHE = 'bible-scroll-art'
